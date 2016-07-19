@@ -1,3 +1,5 @@
+#![feature(const_fn)]
+
 //! ![](http://terhix.com/doc/json-rust-logo-small.png)
 //!
 //! # json-rust

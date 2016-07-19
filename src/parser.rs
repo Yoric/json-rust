@@ -17,6 +17,8 @@
 // This makes for some ugly code, but it is faster. Hopefully in the future
 // with MIR support the compiler will get smarter about this.
 
+extern crate simd;
+
 use std::{ ptr, mem, str, slice, char };
 use object::Object;
 use number::Number;
@@ -146,6 +148,9 @@ macro_rules! expect {
     })
 }
 
+const CT_SIMD: simd::u8x16 = simd::u8x16::new(0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20);
+const QU_SIMD: simd::u8x16 = simd::u8x16::new(0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22);
+const BS_SIMD: simd::u8x16 = simd::u8x16::new(0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C,0x5C);
 
 // Look up table that marks which characters are allowed in their raw
 // form in a string.
@@ -174,7 +179,6 @@ static ALLOWED: [bool; 256] = [
   __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, // F
 ];
 
-
 // Expect a string. This is called after encontering, and consuming, a
 // double quote character. This macro has a happy path variant where it
 // does almost nothing as long as all characters are allowed (as described
@@ -184,7 +188,18 @@ static ALLOWED: [bool; 256] = [
 macro_rules! expect_string {
     ($parser:ident) => ({
         let result: &str;
+
         let start = $parser.index;
+
+        for _ in 0 .. ($parser.length - $parser.index) >> 4 {
+            let bytes = simd::u8x16::load($parser.source.as_bytes(), $parser.index);
+
+            if (bytes.lt(CT_SIMD) | bytes.eq(BS_SIMD) | bytes.eq(QU_SIMD)).any() {
+                break;
+            }
+
+            $parser.index += 16;
+        }
 
         loop {
             let ch = expect_byte!($parser);
