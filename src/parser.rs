@@ -208,11 +208,20 @@ macro_rules! expect_string {
 
             // --- SIMD parsing start ---
             for _ in 0 .. ($parser.length - $parser.index) >> 4 {
-                let bytes = simd::u8x16::load($parser.source.as_bytes(), $parser.index);
+                unsafe {
+                    let mut bytes: simd::u8x16 = mem::uninitialized();
+                    let bytes_ptr: *mut u8 = mem::transmute(&mut bytes);
+                    ptr::copy_nonoverlapping(
+                        $parser.byte_ptr.offset($parser.index as isize),
+                        bytes_ptr,
+                        16
+                    );
 
-                if (bytes.lt(CT_SIMD) | bytes.eq(BS_SIMD) | bytes.eq(QU_SIMD)).any() {
-                    break;
+                    if (bytes.lt(CT_SIMD) | bytes.eq(BS_SIMD) | bytes.eq(QU_SIMD)).any() {
+                        break;
+                    }
                 }
+
 
                 $parser.index += 16;
             }
