@@ -191,14 +191,32 @@ macro_rules! expect_string {
 
         let start = $parser.index;
 
-        for _ in 0 .. ($parser.length - $parser.index) >> 4 {
-            let bytes = simd::u8x16::load($parser.source.as_bytes(), $parser.index);
-
-            if (bytes.lt(CT_SIMD) | bytes.eq(BS_SIMD) | bytes.eq(QU_SIMD)).any() {
-                break;
+        if $parser.length - start >= 16 {
+            // --- SIMD alignment start ---
+            for _ in 0 .. unsafe {
+                ($parser.byte_ptr.offset($parser.index as isize) as usize) % 16
+            } {
+                let ch = expect_byte!($parser);
+                if ALLOWED[ch as usize] {
+                    continue;
+                } else {
+                    $parser.index -= 1;
+                    break;
+                }
             }
+            // --- SIMD alignment end ---
 
-            $parser.index += 16;
+            // --- SIMD parsing start ---
+            for _ in 0 .. ($parser.length - $parser.index) >> 4 {
+                let bytes = simd::u8x16::load($parser.source.as_bytes(), $parser.index);
+
+                if (bytes.lt(CT_SIMD) | bytes.eq(BS_SIMD) | bytes.eq(QU_SIMD)).any() {
+                    break;
+                }
+
+                $parser.index += 16;
+            }
+            // --- SIMD parsing end ---
         }
 
         loop {

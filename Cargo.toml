@@ -9,3 +9,10 @@ license = "MIT/Apache-2.0"
 
 [dependencies]
 simd = { git = "https://github.com/huonw/simd" }
+
+[dev-dependencies]
+serde = "*"
+serde_json = "*"
+serde_macros = "*"
+rustc-serialize = "*"
+num-traits = "*"
