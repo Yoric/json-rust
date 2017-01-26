@@ -200,11 +200,12 @@ macro_rules! expect_string {
                 continue;
             }
             if ch == b'"' {
-                unsafe {
-                    let ptr = $parser.byte_ptr.offset(start as isize);
-                    let len = $parser.index - 1 - start;
-                    result = str::from_utf8_unchecked(slice::from_raw_parts(ptr, len));
-                }
+                result = &$parser.source[start..$parser.index - 1];
+                // unsafe {
+                //     let ptr = $parser.byte_ptr.offset(start as isize);
+                //     let len = $parser.index - 1 - start;
+                //     result = str::from_utf8_unchecked(slice::from_raw_parts(ptr, len));
+                // }
                 break;
             }
             if ch == b'\\' {

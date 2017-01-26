@@ -4,7 +4,6 @@ use std::ops::{ Index, IndexMut, Deref };
 use value::JsonValue;
 
 const KEY_BUF_LEN: usize = 32;
-static NULL: JsonValue = JsonValue::Null;
 
 // FNV-1a implementation
 //
@@ -67,12 +66,14 @@ struct Key {
 impl Key {
     #[inline]
     fn new(hash: u64, len: usize) -> Self {
-        Key {
-            buf: [0; KEY_BUF_LEN],
-            len: len,
-            ptr: ptr::null_mut(),
-            hash: hash
-        }
+        let mut key = unsafe {
+            mem::uninitialized::<Key>()
+        };
+
+        key.len = len;
+        key.hash = hash;
+
+        key
     }
 
     #[inline]
@@ -175,12 +176,9 @@ impl Clone for Key {
 }
 
 #[derive(Clone)]
-struct Node {
+struct Node<T> {
     // String-esque key abstraction
     pub key: Key,
-
-    // Value stored.
-    pub value: JsonValue,
 
     // Store vector index pointing to the `Node` for which `key_hash` is smaller
     // than that of this `Node`.
@@ -191,30 +189,33 @@ struct Node {
     // hash is the same, but keys are different, the lookup will default
     // to the right branch as well.
     pub right: usize,
+
+    // Value stored.
+    pub value: T,
 }
 
-impl fmt::Debug for Node {
+impl<T: fmt::Debug> fmt::Debug for Node<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&(self.key.as_str(), &self.value, self.left, self.right), f)
     }
 }
 
-impl PartialEq for Node {
-    fn eq(&self, other: &Node) -> bool {
+impl<T: PartialEq> PartialEq for Node<T> {
+    fn eq(&self, other: &Node<T>) -> bool {
         self.key.hash       == other.key.hash       &&
         self.key.as_bytes() == other.key.as_bytes() &&
         self.value          == other.value
     }
 }
 
-impl Node {
+impl<T> Node<T> {
     #[inline]
-    fn new(value: JsonValue, hash: u64, len: usize) -> Node {
+    fn new(value: T, hash: u64, len: usize) -> Self {
         Node {
             key: Key::new(hash, len),
-            value: value,
             left: 0,
             right: 0,
+            value: value,
         }
     }
 }
@@ -223,16 +224,18 @@ impl Node {
 /// have to interact with instances of `Object`, much more likely you will be
 /// using the `JsonValue::Object` variant, which wraps around this struct.
 #[derive(Debug)]
-pub struct Object {
-    store: Vec<Node>
+pub struct StrMap<V: Default + PartialEq + Clone> {
+    store: Vec<Node<V>>
 }
 
-impl Object {
+pub type Object = StrMap<JsonValue>;
+
+impl<V: Default + PartialEq + Clone> StrMap<V> {
     /// Create a new, empty instance of `Object`. Empty `Object` performs no
     /// allocation until a value is inserted into it.
     #[inline(always)]
     pub fn new() -> Self {
-        Object {
+        StrMap {
             store: Vec::new()
         }
     }
@@ -241,18 +244,18 @@ impl Object {
     /// of entries.
     #[inline(always)]
     pub fn with_capacity(capacity: usize) -> Self {
-        Object {
+        StrMap {
             store: Vec::with_capacity(capacity)
         }
     }
 
     #[inline]
-    fn node_at_index_mut(&mut self, index: usize) -> *mut Node {
+    fn node_at_index_mut(&mut self, index: usize) -> *mut Node<V> {
         unsafe { self.store.as_mut_ptr().offset(index as isize) }
     }
 
     #[inline(always)]
-    fn add_node(&mut self, key: &[u8], value: JsonValue, hash: u64) -> usize {
+    fn add_node(&mut self, key: &[u8], value: V, hash: u64) -> usize {
         let index = self.store.len();
 
         if index < self.store.capacity() {
@@ -267,7 +270,7 @@ impl Object {
                 // To whomever gets concerned: I got better results with
                 // copy than write. Difference in benchmarks wasn't big though.
                 ptr::copy_nonoverlapping(
-                    &node as *const Node,
+                    &node as *const Node<V>,
                     self.store.as_mut_ptr().offset(index as isize),
                     1,
                 );
@@ -297,14 +300,14 @@ impl Object {
     /// to be a `&str` slice and not an owned `String`. The internals of
     /// `Object` will handle the heap allocation of the key if needed for
     /// better performance.
-    pub fn insert(&mut self, key: &str, value: JsonValue) {
+    pub fn insert(&mut self, key: &str, value: V) -> &mut V {
         let key = key.as_bytes();
         let hash = hash_key(key);
 
         if self.store.len() == 0 {
             self.store.push(Node::new(value, hash, key.len()));
             self.store[0].key.attach(key);
-            return;
+            return &mut self.store[0].value;
         }
 
         let mut node = unsafe { &mut *self.node_at_index_mut(0) };
@@ -313,35 +316,37 @@ impl Object {
         loop {
             if hash == node.key.hash && key == node.key.as_bytes() {
                 node.value = value;
-                return;
+                return &mut node.value;
             } else if hash < node.key.hash {
                 if node.left != 0 {
                     parent = node.left;
                     node = unsafe { &mut *self.node_at_index_mut(node.left) };
                     continue;
                 }
-                self.store[parent].left = self.add_node(key, value, hash);
-                return;
+                let added = self.add_node(key, value, hash);
+                self.store[parent].left = added;
+                return &mut self.store[added].value;
             } else {
                 if node.right != 0 {
                     parent = node.right;
                     node = unsafe { &mut *self.node_at_index_mut(node.right) };
                     continue;
                 }
-                self.store[parent].right = self.add_node(key, value, hash);
-                return;
+                let added = self.add_node(key, value, hash);
+                self.store[parent].right = added;
+                return &mut self.store[added].value;
             }
         }
     }
 
     #[inline]
-    pub fn override_last(&mut self, value: JsonValue) {
+    pub fn override_last(&mut self, value: V) {
         if let Some(node) = self.store.last_mut() {
             node.value = value;
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&JsonValue> {
+    pub fn get(&self, key: &str) -> Option<&V> {
         if self.store.len() == 0 {
             return None;
         }
@@ -368,7 +373,7 @@ impl Object {
         }
     }
 
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut JsonValue> {
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut V> {
         if self.store.len() == 0 {
             return None;
         }
@@ -406,7 +411,7 @@ impl Object {
 
     /// Attempts to remove the value behind `key`, if successful
     /// will return the `JsonValue` stored behind the `key`.
-    pub fn remove(&mut self, key: &str) -> Option<JsonValue> {
+    pub fn remove(&mut self, key: &str) -> Option<V> {
         if self.store.len() == 0 {
             return None;
         }
@@ -442,16 +447,16 @@ impl Object {
         // recreate it. This is a very costly operation, but removing nodes
         // in JSON shouldn't happen very often if at all. Optimizing this
         // can wait for better times.
-        let mut new_object = Object::with_capacity(self.store.len() - 1);
+        let mut new_object = StrMap::with_capacity(self.store.len() - 1);
         let mut removed = None;
 
         for (i, node) in self.store.iter_mut().enumerate() {
             if i == index {
                 // Rust doesn't like us moving things from `node`, even if
                 // it is owned. Replace fixes that.
-                removed = Some(mem::replace(&mut node.value, JsonValue::Null));
+                removed = Some(mem::replace(&mut node.value, V::default()));
             } else {
-                let value = mem::replace(&mut node.value, JsonValue::Null);
+                let value = mem::replace(&mut node.value, V::default());
 
                 new_object.insert(node.key.as_str(), value);
             }
@@ -462,12 +467,12 @@ impl Object {
         removed
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> usize {
         self.store.len()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.store.is_empty()
     }
@@ -477,15 +482,15 @@ impl Object {
         self.store.clear();
     }
 
-    #[inline(always)]
-    pub fn iter(&self) -> Iter {
+    #[inline]
+    pub fn iter(&self) -> Iter<V> {
         Iter {
             inner: self.store.iter()
         }
     }
 
-    #[inline(always)]
-    pub fn iter_mut(&mut self) -> IterMut {
+    #[inline]
+    pub fn iter_mut(&mut self) -> IterMut<V> {
         IterMut {
             inner: self.store.iter_mut()
         }
@@ -494,7 +499,7 @@ impl Object {
 
 // Custom implementation of `Clone`, as new heap allocation means
 // we have to fix key pointers everywhere!
-impl Clone for Object {
+impl<V: Default + PartialEq + Clone> Clone for StrMap<V> {
     fn clone(&self) -> Self {
         let mut store = self.store.clone();
 
@@ -502,7 +507,7 @@ impl Clone for Object {
             node.key.fix_ptr();
         }
 
-        Object {
+        StrMap {
             store: store
         }
     }
@@ -511,8 +516,8 @@ impl Clone for Object {
 // Because keys can inserted in different order, the safe way to
 // compare `Object`s is to iterate over one and check if the other
 // has all the same keys.
-impl PartialEq for Object {
-    fn eq(&self, other: &Object) -> bool {
+impl<V: Default + PartialEq + Clone> PartialEq for StrMap<V> {
+    fn eq(&self, other: &Self) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -528,11 +533,11 @@ impl PartialEq for Object {
     }
 }
 
-pub struct Iter<'a> {
-    inner: slice::Iter<'a, Node>
+pub struct Iter<'a, V: 'a> {
+    inner: slice::Iter<'a, Node<V>>
 }
 
-impl<'a> Iter<'a> {
+impl<'a, V: 'a> Iter<'a, V> {
     /// Create an empty iterator that always returns `None`
     pub fn empty() -> Self {
         Iter {
@@ -541,28 +546,29 @@ impl<'a> Iter<'a> {
     }
 }
 
-impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a str, &'a JsonValue);
+impl<'a, V: 'a> Iterator for Iter<'a, V> {
+    type Item = (&'a str, &'a V);
 
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|node| (node.key.as_str(), &node.value))
     }
 }
 
-impl<'a> DoubleEndedIterator for Iter<'a> {
-    #[inline(always)]
+impl<'a, V: 'a> DoubleEndedIterator for Iter<'a, V> {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(|node| (node.key.as_str(), &node.value))
     }
 }
 
-pub struct IterMut<'a> {
-    inner: slice::IterMut<'a, Node>
+pub struct IterMut<'a, V: 'a> {
+    inner: slice::IterMut<'a, Node<V>>
 }
 
-impl<'a> IterMut<'a> {
+impl<'a, V: 'a> IterMut<'a, V> {
     /// Create an empty iterator that always returns `None`
+    #[inline]
     pub fn empty() -> Self {
         IterMut {
             inner: [].iter_mut()
@@ -570,17 +576,17 @@ impl<'a> IterMut<'a> {
     }
 }
 
-impl<'a> Iterator for IterMut<'a> {
-    type Item = (&'a str, &'a mut JsonValue);
+impl<'a, V: 'a> Iterator for IterMut<'a, V> {
+    type Item = (&'a str, &'a mut V);
 
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.next().map(|node| (node.key.as_str(), &mut node.value))
     }
 }
 
-impl<'a> DoubleEndedIterator for IterMut<'a> {
-    #[inline(always)]
+impl<'a, V: 'a> DoubleEndedIterator for IterMut<'a, V> {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         self.inner.next_back().map(|node| (node.key.as_str(), &mut node.value))
     }
@@ -609,7 +615,10 @@ impl<'a> DoubleEndedIterator for IterMut<'a> {
 impl<'a> Index<&'a str> for Object {
     type Output = JsonValue;
 
+    #[inline]
     fn index(&self, index: &str) -> &JsonValue {
+        static NULL: JsonValue = JsonValue::Null;
+
         match self.get(index) {
             Some(value) => value,
             _ => &NULL
@@ -620,7 +629,8 @@ impl<'a> Index<&'a str> for Object {
 impl Index<String> for Object {
     type Output = JsonValue;
 
-    fn index(&self, index: String) -> &JsonValue {
+    #[inline]
+    fn index(&self, index: String) -> &Self::Output {
         self.index(index.deref())
     }
 }
@@ -628,7 +638,8 @@ impl Index<String> for Object {
 impl<'a> Index<&'a String> for Object {
     type Output = JsonValue;
 
-    fn index(&self, index: &String) -> &JsonValue {
+    #[inline]
+    fn index(&self, index: &String) -> &Self::Output {
         self.index(index.deref())
     }
 }
@@ -653,11 +664,16 @@ impl<'a> Index<&'a String> for Object {
 /// # }
 /// ```
 impl<'a> IndexMut<&'a str> for Object {
-    fn index_mut(&mut self, index: &str) -> &mut JsonValue {
-        if self.get(index).is_none() {
-            self.insert(index, JsonValue::Null);
+    fn index_mut<'b>(&'b mut self, index: &'a str) -> &'b mut JsonValue {
+        match self.get_mut(index) {
+            // This is a massive and ugly hack around the lexical borrowck.
+            // There are ways to do this that don't violate borrowck, but they all
+            // take a performance hit one way or another.
+            Some(value) => return unsafe { &mut *(value as *mut JsonValue) },
+            None        => {}
         }
-        self.get_mut(index).unwrap()
+
+        self.insert(index, JsonValue::Null)
     }
 }
 

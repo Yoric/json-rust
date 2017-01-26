@@ -8,7 +8,7 @@ use short::Short;
 use number::Number;
 use object::Object;
 use iterators::{ Members, MembersMut, Entries, EntriesMut };
-use codegen::{ Generator, PrettyGenerator, DumpGenerator, WriterGenerator, PrettyWriterGenerator };
+use codegen::{ ToJson, PrettyGenerator, DumpGenerator, WriterGenerator, PrettyWriterGenerator };
 
 mod implements;
 
@@ -71,6 +71,12 @@ impl fmt::Display for JsonValue {
     }
 }
 
+impl Default for JsonValue {
+    #[inline]
+    fn default() -> Self {
+        JsonValue::Null
+    }
+}
 
 static NULL: JsonValue = JsonValue::Null;
 
@@ -90,7 +96,7 @@ impl JsonValue {
     /// Prints out the value as JSON string.
     pub fn dump(&self) -> String {
         let mut gen = DumpGenerator::new();
-        gen.write_json(self).expect("Can't fail");
+        self.generate(&mut gen).expect("Can't fail");
         gen.consume()
     }
 
@@ -98,29 +104,20 @@ impl JsonValue {
     /// number of spaces to indent new blocks with.
     pub fn pretty(&self, spaces: u16) -> String {
         let mut gen = PrettyGenerator::new(spaces);
-        gen.write_json(self).expect("Can't fail");
+        self.generate(&mut gen).expect("Can't fail");
         gen.consume()
-    }
-
-    /// Writes the JSON as byte stream into an implementor of `std::io::Write`.
-    ///
-    /// This method is deprecated as it will panic on io errors, use `write` instead.
-    #[deprecated(since="0.10.2", note="use `JsonValue::write` instead")]
-    pub fn to_writer<W: Write>(&self, writer: &mut W) {
-        let mut gen = WriterGenerator::new(writer);
-        gen.write_json(self).expect("Deprecated");
     }
 
     /// Writes the JSON as byte stream into an implementor of `std::io::Write`.
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         let mut gen = WriterGenerator::new(writer);
-        gen.write_json(self)
+        self.generate(&mut gen)
     }
 
     /// Writes the JSON as byte stream into an implementor of `std::io::Write`.
     pub fn write_pretty<W: Write>(&self, writer: &mut W, spaces: u16) -> io::Result<()> {
         let mut gen = PrettyWriterGenerator::new(writer, spaces);
-        gen.write_json(self)
+        self.generate(&mut gen)
     }
 
     pub fn is_string(&self) -> bool {

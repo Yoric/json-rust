@@ -204,6 +204,9 @@ mod value;
 mod error;
 mod util;
 
+pub use codegen::{Generator, DumpGenerator, PrettyGenerator, ToJson};
+
+pub mod writer;
 pub mod short;
 pub mod object;
 pub mod number;
@@ -227,10 +230,10 @@ pub mod iterators {
     pub type MembersMut<'a> = ::std::slice::IterMut<'a, super::JsonValue>;
 
     /// Iterator over key value pairs of `JsonValue::Object`.
-    pub type Entries<'a> = super::object::Iter<'a>;
+    pub type Entries<'a> = super::object::Iter<'a, super::JsonValue>;
 
     /// Mutable iterator over key value pairs of `JsonValue::Object`.
-    pub type EntriesMut<'a> = super::object::IterMut<'a>;
+    pub type EntriesMut<'a> = super::object::IterMut<'a, super::JsonValue>;
 }
 
 #[deprecated(since="0.9.0", note="use `json::Error` instead")]
@@ -249,16 +252,18 @@ pub fn from<T>(value: T) -> JsonValue where T: Into<JsonValue> {
 }
 
 /// Pretty prints out the value as JSON string.
-pub fn stringify<T>(root: T) -> String where T: Into<JsonValue> {
-    let root: JsonValue = root.into();
-    root.dump()
+pub fn stringify<T>(root: T) -> String where T: ToJson<DumpGenerator> {
+    let mut gen = DumpGenerator::new();
+    root.generate(&mut gen).expect("Can't fail on buffers");
+    gen.consume()
 }
 
 /// Pretty prints out the value as JSON string. Second argument is a
 /// number of spaces to indent new blocks with.
-pub fn stringify_pretty<T>(root: T, spaces: u16) -> String where T: Into<JsonValue> {
-    let root: JsonValue = root.into();
-    root.pretty(spaces)
+pub fn stringify_pretty<T>(root: T, spaces: u16) -> String where T: ToJson<PrettyGenerator> {
+    let mut gen = PrettyGenerator::new(spaces);
+    root.generate(&mut gen).expect("Can't fail on buffers");
+    gen.consume()
 }
 
 /// Helper macro for creating instances of `JsonValue::Array`.
@@ -322,4 +327,3 @@ macro_rules! object {
         $crate::JsonValue::Object(object)
     })
 }
-

@@ -11,6 +11,11 @@ fn stringify_null() {
 }
 
 #[test]
+fn stringify_void() {
+    assert_eq!(stringify(()), "null");
+}
+
+#[test]
 fn stringify_option_none() {
     let foo: Option<String> = None;
     assert_eq!(stringify(foo), "null");
@@ -20,6 +25,24 @@ fn stringify_option_none() {
 fn stringify_option_integer() {
     let foo = Some(100);
     assert_eq!(stringify(foo), "100");
+}
+
+#[test]
+fn stringify_slice() {
+    let foo: &[&str] = &["foo", "bar"];
+    assert_eq!(stringify(foo), r#"["foo","bar"]"#);
+}
+
+#[test]
+fn stringify_plain_vec() {
+    let foo = vec!["foo", "bar"];
+    assert_eq!(stringify(foo), r#"["foo","bar"]"#);
+}
+
+#[test]
+fn stringify_slice_option() {
+    let foo: &[Option<&str>] = &[Some("foo"), None];
+    assert_eq!(stringify(foo), r#"["foo",null]"#);
 }
 
 #[test]
@@ -159,7 +182,7 @@ fn stringify_raw_object() {
 
 #[test]
 fn stringify_btree_map() {
-    let mut map = BTreeMap::new();
+    let mut map: BTreeMap<String, JsonValue> = BTreeMap::new();
 
     map.insert("name".into(), "Maciej".into());
     map.insert("age".into(), 30.into());
@@ -170,7 +193,7 @@ fn stringify_btree_map() {
 
 #[test]
 fn stringify_hash_map() {
-    let mut map = HashMap::new();
+    let mut map: HashMap<String, JsonValue> = HashMap::new();
 
     map.insert("name".into(), "Maciej".into());
     map.insert("age".into(), 30.into());

@@ -1,9 +1,11 @@
+pub mod to_json;
+
+pub use codegen::to_json::ToJson;
+
 use std::ptr;
 use std::io::Write;
-use JsonValue;
-use number::Number;
 use std::io;
-
+use number::Number;
 use util::print_dec;
 
 const QU: u8 = b'"';
@@ -64,7 +66,7 @@ pub trait Generator {
     fn dedent(&mut self) {}
 
     #[inline(never)]
-    fn write_string_complex(&mut self, string: &str, mut start: usize) -> io::Result<()> {
+    fn write_str_complex(&mut self, string: &str, mut start: usize) -> io::Result<()> {
         try!(self.write(string[ .. start].as_bytes()));
 
         for (index, ch) in string.bytes().enumerate().skip(start) {
@@ -84,12 +86,12 @@ pub trait Generator {
     }
 
     #[inline(always)]
-    fn write_string(&mut self, string: &str) -> io::Result<()> {
+    fn write_str(&mut self, string: &str) -> io::Result<()> {
         try!(self.write_char(b'"'));
 
         for (index, ch) in string.bytes().enumerate() {
             if ESCAPED[ch as usize] > 0 {
-                return self.write_string_complex(string, index)
+                return self.write_str_complex(string, index)
             }
         }
 
@@ -112,68 +114,8 @@ pub trait Generator {
             )
         }
     }
-
-    fn write_json(&mut self, json: &JsonValue) -> io::Result<()> {
-        match *json {
-            JsonValue::Null               => self.write(b"null"),
-            JsonValue::Short(ref short)   => self.write_string(short.as_str()),
-            JsonValue::String(ref string) => self.write_string(string),
-            JsonValue::Number(ref number) => self.write_number(number),
-            JsonValue::Boolean(true)      => self.write(b"true"),
-            JsonValue::Boolean(false)     => self.write(b"false"),
-            JsonValue::Array(ref array)   => {
-                try!(self.write_char(b'['));
-                let mut iter = array.iter();
-
-                if let Some(item) = iter.next() {
-                    self.indent();
-                    try!(self.new_line());
-                    try!(self.write_json(item));
-                } else {
-                    try!(self.write_char(b']'));
-                    return Ok(());
-                }
-
-                for item in iter {
-                    try!(self.write_char(b','));
-                    try!(self.new_line());
-                    try!(self.write_json(item));
-                }
-
-                self.dedent();
-                try!(self.new_line());
-                self.write_char(b']')
-            },
-            JsonValue::Object(ref object) => {
-                try!(self.write_char(b'{'));
-                let mut iter = object.iter();
-
-                if let Some((key, value)) = iter.next() {
-                    self.indent();
-                    try!(self.new_line());
-                    try!(self.write_string(key));
-                    try!(self.write_min(b": ", b':'));
-                    try!(self.write_json(value));
-                } else {
-                    try!(self.write_char(b'}'));
-                    return Ok(());
-                }
-
-                for (key, value) in iter {
-                    try!(self.write_char(b','));
-                    try!(self.new_line());
-                    try!(self.write_string(key));
-                    try!(self.write_min(b": ", b':'));
-                    try!(self.write_json(value));
-                }
-
-                self.dedent();
-                try!(self.new_line());
-                self.write_char(b'}')
-            }
-        }
-    }
 }
+
 
 pub struct DumpGenerator {
     code: Vec<u8>,

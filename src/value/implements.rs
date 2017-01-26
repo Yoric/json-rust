@@ -2,13 +2,11 @@
 // implementations for `JsonValue`.
 
 use std::collections::{ BTreeMap, HashMap };
-use std::mem;
+use JsonValue;
 
 use short::{ self, Short };
 use number::Number;
 use object::Object;
-
-use { JsonValue, Null };
 
 macro_rules! implement_eq {
     ($to:ident, $from:ty) => {
@@ -83,15 +81,59 @@ impl<T: Into<JsonValue>> From<Option<T>> for JsonValue {
 
 impl<T: Into<JsonValue>> From<Vec<T>> for JsonValue {
     fn from(val: Vec<T>) -> JsonValue {
-        let mut array = Vec::with_capacity(val.len());
-
-        for val in val {
-            array.push(val.into());
-        }
-
-        JsonValue::Array(array)
+        JsonValue::Array(val.into_iter().map(Into::into).collect())
     }
 }
+
+impl<'a, T: Clone + Into<JsonValue>> From<&'a [T]> for JsonValue {
+    fn from(val: &[T]) -> JsonValue {
+        JsonValue::Array(val.into_iter().map(Clone::clone).map(Into::into).collect())
+    }
+}
+
+macro_rules! impl_arr {
+    ($count:expr) => {
+        impl<T: Clone + Into<JsonValue>> From<[T; $count]> for JsonValue {
+            fn from(val: [T; $count]) -> JsonValue {
+                JsonValue::Array(val.into_iter().map(Clone::clone).map(Into::into).collect())
+            }
+        }
+    }
+}
+
+impl_arr!(0);
+impl_arr!(1);
+impl_arr!(2);
+impl_arr!(3);
+impl_arr!(4);
+impl_arr!(5);
+impl_arr!(6);
+impl_arr!(7);
+impl_arr!(8);
+impl_arr!(9);
+impl_arr!(10);
+impl_arr!(11);
+impl_arr!(12);
+impl_arr!(13);
+impl_arr!(14);
+impl_arr!(15);
+impl_arr!(16);
+impl_arr!(17);
+impl_arr!(18);
+impl_arr!(19);
+impl_arr!(20);
+impl_arr!(21);
+impl_arr!(22);
+impl_arr!(23);
+impl_arr!(24);
+impl_arr!(25);
+impl_arr!(26);
+impl_arr!(27);
+impl_arr!(28);
+impl_arr!(29);
+impl_arr!(30);
+impl_arr!(31);
+impl_arr!(32);
 
 impl From<HashMap<String, JsonValue>> for JsonValue {
     fn from(mut val: HashMap<String, JsonValue>) -> JsonValue {
@@ -110,11 +152,7 @@ impl From<BTreeMap<String, JsonValue>> for JsonValue {
         let mut object = Object::with_capacity(val.len());
 
         for (key, value) in val.iter_mut() {
-            // Since BTreeMap has no `drain` available, we can use
-            // the mutable iterator and replace all values by nulls,
-            // taking ownership and transfering it to the new `Object`.
-            let value = mem::replace(value, Null);
-            object.insert(key, value);
+            object.insert(key, value.take());
         }
 
         JsonValue::Object(object)
